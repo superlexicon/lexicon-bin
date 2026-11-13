@@ -1,0 +1,153 @@
+{
+  "_README": [
+    "Sample configuration template for an FLRC (LR2021 radio) deployment.",
+    "Copy this file to `config.json` and edit the placeholders marked <REPLACE_...> below.",
+    "",
+    "PREREQUISITES:",
+    "  1. Ensure `lexicon-node` is installed (`bash install.sh`).",
+    "  2. Generate node keypair:",
+    "         lexicon-node generate-key node.key",
+    "     Paste the 'Private key (hex)' into p2p.private_key below.",
+    "  3. Connect LR2021 USB bridge board (typically /dev/ttyACM0 on Linux/Mac).",
+    "  4. Set serial_port and configure frequency_hz / bandwidth_hz to match all nodes in the mesh."
+  ],
+
+  "app_name": "SuperLexicon-FLRC",
+  "version": "1.0.0",
+
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "max_connections": 100
+  },
+
+  "database": {
+    "consensus_db_path": "consensus.db"
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "app.log"
+  },
+
+  "features": {
+    "enable_metrics": true,
+    "enable_cache": true,
+    "cache_ttl_seconds": 3600
+  },
+
+  "p2p": {
+    "listen_address": "0.0.0.0",
+    "listen_port": 30303,
+    "max_peers": 50,
+    "min_peers": 1,
+    "bootstrap_nodes": [],
+    "network_id": 1337,
+    "protocol_version": 66,
+    "discovery_enabled": true,
+    "mdns_enabled": false,
+    "discv5_enabled": false,
+    "connection_retry_delay_ms": 5000,
+    "max_connection_attempts": 5,
+    "bootstrap_interval_seconds": 30,
+    "idle_connection_timeout_seconds": 10,
+    "kademlia_enabled": false,
+    "kademlia_protocol": "/superlexicon/kad/1.0.0",
+    "initial_validators": [],
+    "validator_peer_mappings": {},
+    "private_key": "<REPLACE_WITH_THIS_NODES_PRIVATE_KEY_HEX>"
+  },
+
+  "api": {
+    "jsonrpc": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8545,
+      "max_connections": 100,
+      "cors_enabled": true,
+      "allowed_origins": ["*"]
+    },
+    "graphql": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8547,
+      "playground": true,
+      "max_complexity": 100,
+      "max_depth": 15
+    },
+    "grpc": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 50051,
+      "reflection": true,
+      "tls_enabled": false,
+      "cert_path": null,
+      "key_path": null
+    },
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8546,
+      "max_connections": 100
+    }
+  },
+
+  "genesis": {
+    "transport_selection": {
+      "peer_exchange": "Flrc",
+      "transaction": "Flrc",
+      "block_proposal": "Flrc",
+      "final_block": "Flrc",
+      "receipt": "Flrc",
+      "contract_state": "Flrc",
+      "db_sync": "Flrc",
+      "bytecode_sync": "Flrc",
+      "role_proposal": "Flrc",
+      "finalized_role": "Flrc"
+    },
+    "validator_promotion_threshold": 100,
+    "block_gas_limit": 100000000,
+    "max_transaction_gas_limit": 10000000,
+    "max_bytecode_size": 100000,
+    "max_constructor_args_size": 32768,
+    "max_nonce_gap": 10,
+    "max_txs_per_origin_node": 100,
+    "reputation_account_threshold": -100,
+    "reputation_node_threshold": -1000,
+    "reputation_success_delta": 1,
+    "reputation_failure_delta": 1,
+    "reputation_blacklist_enabled": true,
+    "block_interval_ms": 1000,
+    "pre_phase1_ms": 500,
+    "consensus_phase1_ms": 8000,
+    "pre_phase2_ms": 4000,
+    "consensus_phase2_ms": 5000,
+    "pre_phase3_ms": 3000,
+    "consensus_block_broadcast_ms": 4000,
+    "timestamp": 0,
+    "chain_id": 1337,
+    "contract_creation_gas_per_byte": 1,
+    "max_parallel_execution_groups": 8,
+    "mempool_exchange_timeout_ms": 10000,
+    "block_proposal_timeout_ms": 15000,
+    "insufficient_participation_timeout_ms": 30000,
+    "post_byzantine_mempool_timeout_ms": 3000,
+    "post_byzantine_proposal_timeout_ms": 2000,
+    "network_thread_pool_size": 4,
+    "network_thread_replicas_size": 3,
+    "threadpool_consensus_threshold_percentage": 0.67
+  },
+
+  "lr2021": {
+    "enabled": true,
+    "serial_port": "/dev/ttyACM0",
+    "baud_rate": 115200,
+    "frequency_hz": 867100000,
+    "bandwidth_hz": 1200000,
+    "coding_rate": 1,
+    "tx_power_dbm": 22,
+    "sync_word": "0x12345690",
+    "tx_ingress_mode": "rpc",
+    "client_radio": null
+  }
+}

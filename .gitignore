@@ -1,0 +1,6 @@
+# Runtime data & local databases
+*.db/
+*.db-flatkv/
+*.log
+config.json
+node.key
