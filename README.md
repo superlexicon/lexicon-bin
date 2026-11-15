@@ -14,6 +14,7 @@ For authoring, unit-testing, compiling, optimizing, and deploying **Haltproof Su
 | `bin/lexicon-node` | Prebuilt Linux `x86_64` `lexicon-node` executable (statically linked RocksDB + `rustls` TLS + Wasmtime JIT) |
 | `bin/SHA256SUMS` | SHA-256 checksum for verifying `bin/lexicon-node` |
 | `install.sh` | Installs `lexicon-node` into `~/.local/bin` (or `$INSTALL_DIR`) |
+| `scripts/generate-subnet-configs.sh` | Turnkey generator that creates an $N$-validator + Roamer subnet configuration bundle (`config.json`, `node.key`, and `lexicon-node.service` per node) |
 | `config.flrc-example.json` | Reference configuration template for multi-node Semtech LR2021 FLRC radio subnets |
 
 ---
@@ -27,7 +28,7 @@ cd lexicon-bin
 # Verify binary integrity
 (cd bin && sha256sum -c SHA256SUMS)
 
-# Install to ~/.local/bin/lexicon-node (or run ./bin/lexicon-node directly)
+# Install to ~/.local/bin/lexicon-node (or INSTALL_DIR=/usr/local/bin bash install.sh)
 bash install.sh
 ```
 
@@ -74,28 +75,193 @@ cargo hps call "$HPS" "getCount(bytes32)" "alpha"
 
 ---
 
-## 3. Running on a Live Radio Subnet (Validator / Roamer / Repeater)
+## 3. Running a Full Multi-Node Subnet (FLRC Radio or TCP/IP)
 
-When operating with Semtech LR2021 FLRC hardware (`Lierda AM36-Pico` USB dongle or LR2021 bridge):
+A production Lexicon subnet consists of **$N$ Genesis Validators** (typically $N \ge 4$ for $3f+1$ BFT quorum resilience, where $\lceil 2N/3 \rceil$ validators finalize each block) plus optional **Roamers** and **Repeaters**.
+
+All validators in a subnet must share:
+1. The exact same ordered `p2p.initial_validators` list (32-byte hex Ed25519 public keys).
+2. The exact same `p2p.validator_peer_mappings` dictionary (`"<public_key_hex>": "<12D3KooW..._peer_id>"`).
+3. Identical consensus window timings (`genesis.pre_phase1_ms` .. `genesis.consensus_phase4_ms`) and radio parameters (`lr2021.frequency_hz`, `bandwidth_hz`, `coding_rate`, `sync_word`).
+4. Synchronized system clocks within **$\pm 50\,\text{ms}$** (via NTP/`chrony` or a hardware GNSS NMEA receiver configured in `genesis.gnss_device`), since the 8-step TDMA/CSMA consensus window is anchored to UTC Unix millisecond boundaries.
+
+---
+
+### 3.1 Option A: One-Command Subnet Configuration Bundle Generator (Recommended)
+
+Use [`scripts/generate-subnet-configs.sh`](scripts/generate-subnet-configs.sh) to automatically generate keys, `initial_validators`, `validator_peer_mappings`, `config.json`, and `systemd` service files for an entire $N$-validator subnet:
 
 ```bash
-# 1. Generate an Ed25519/secp256k1 node keypair
+# Generate a 4-validator + 1-roamer FLRC radio subnet bundle in ./subnet-bundle
+bash scripts/generate-subnet-configs.sh 4 ./subnet-bundle Flrc
+
+# Or generate a 4-validator TCP/IP (Libp2p) subnet bundle (no radio hardware required)
+bash scripts/generate-subnet-configs.sh 4 ./subnet-bundle-ip Libp2p
+```
+
+This creates:
+```text
+subnet-bundle/
+├── validator-1/
+│   ├── config.json            # Pre-populated with validator-1's private_key + full subnet validator set
+│   ├── node.key               # Keypair summary (Peer ID, Public Key, Private Key)
+│   └── lexicon-node.service   # Ready-to-install systemd unit
+├── validator-2/
+├── validator-3/
+├── validator-4/
+└── roamer-1/
+    ├── config.json
+    └── node.key
+```
+
+Copy each `validator-<i>/config.json` and `bin/lexicon-node` to the corresponding validator host:
+
+```bash
+# Example: Deploy validator-1 to host 192.168.50.91
+ssh user@192.168.50.91 "mkdir -p ~/lexicon"
+scp bin/lexicon-node subnet-bundle/validator-1/config.json user@192.168.50.91:~/lexicon/
+```
+
+---
+
+### 3.2 Option B: Manual Step-by-Step Genesis Ceremony
+
+If each validator operator generates their own keypair independently:
+
+#### Step 1: Generate a Node Identity on Each Validator
+On each validator (`1..N`), run:
+```bash
 lexicon-node generate-key node.key
+```
+Output:
+```text
+Generated node identity:
+  Peer ID: 12D3KooWEAnEJfhCDtp3EAcNgDtkEcsYMBvkSSzi6vKciGq3qnz8
+  Public key (hex): 40a991f83f1f4da925345e52dba316ab88847944cfd87e69e7efe4702db37b25
+  Private key (hex): 58dff002a62d481ccd41602ed7a2a443a06d6dfa6faac7775829cee604597cd1
+  Key file: node.key
+```
 
-# 2. Copy the template config and populate `p2p.private_key`, `p2p.initial_validators`, and `lr2021.serial_port`
-cp config.flrc-example.json config.json
+#### Step 2: Assemble `initial_validators` and `validator_peer_mappings`
+Collect the `Public key (hex)` and `Peer ID` from all $N$ validators (keep `Private key (hex)` secret on each respective node). In every node's `config.json` (starting from `cp config.flrc-example.json config.json`), set:
 
-# 3a. Start as a configured genesis validator
+```json
+  "p2p": {
+    "listen_address": "0.0.0.0",
+    "listen_port": 30303,
+    "initial_validators": [
+      "40a991f83f1f4da925345e52dba316ab88847944cfd87e69e7efe4702db37b25",
+      "edfbd90a2b8d7388328d3ca02c5dd9a4e8d6c6a902bcbd6db330de62d27a49bb",
+      "321636b666ba2f54395a131b7cfdbdf92b7115b7ae96c18e6d216f08888a731d",
+      "df1fc01227ac7234845e58110b7403e2d66b73f44474a6c4343c187e1d8fb9ac"
+    ],
+    "validator_peer_mappings": {
+      "40a991f83f1f4da925345e52dba316ab88847944cfd87e69e7efe4702db37b25": "12D3KooWEAnEJfhCDtp3EAcNgDtkEcsYMBvkSSzi6vKciGq3qnz8",
+      "edfbd90a2b8d7388328d3ca02c5dd9a4e8d6c6a902bcbd6db330de62d27a49bb": "12D3KooWRqMXcfk8oPMBFY1n1s5WQvxSQojCyDtYASBXpTVdVu2J",
+      "321636b666ba2f54395a131b7cfdbdf92b7115b7ae96c18e6d216f08888a731d": "12D3KooWDBtCXo1hK7MgMwDcDgwLjmZcnmbeVLG9fmqqGdCYJ8hS",
+      "df1fc01227ac7234845e58110b7403e2d66b73f44474a6c4343c187e1d8fb9ac": "12D3KooWQqMAZ42E6SnGXdw14AFRGv52YkXaWDUJ7auYMAmiTz2F"
+    },
+    "private_key": "<THIS_NODES_PRIVATE_KEY_HEX>"
+  }
+```
+
+---
+
+### 3.3 Configuring Physical Semtech LR2021 FLRC Radio Hardware
+
+When running over physical Semtech LR2021 FLRC USB bridges (`Lierda AM36-Pico` / `/dev/ttyACM*`):
+
+1. **Grant Serial Port Access (`dialout`)**:
+   ```bash
+   sudo usermod -aG dialout "$USER"
+   # Disable ModemManager so it does not probe /dev/ttyACM* with AT commands:
+   sudo systemctl stop ModemManager && sudo systemctl disable ModemManager
+   ```
+
+2. **Single-Radio vs. Dual-Radio (`client_radio`) Configuration**:
+   - **Single Radio (`tx_ingress_mode: "rpc"`)**: `/dev/ttyACM0` handles the 4-phase validator consensus air schedule, while clients submit transactions via HTTP JSON-RPC (`:8545`) or WebSocket (`:8546`).
+   - **Dual Radio (`tx_ingress_mode: "radio"` or `"both"`)**: Attach a second LR2021 dongle (`/dev/ttyACM1`) dedicated to receiving client/Roamer transactions over the air on a separate frequency while `/dev/ttyACM0` runs consensus uninterrupted:
+   ```json
+   "lr2021": {
+     "enabled": true,
+     "serial_port": "/dev/ttyACM0",
+     "baud_rate": 115200,
+     "frequency_hz": 867100000,
+     "bandwidth_hz": 1200000,
+     "coding_rate": 1,
+     "tx_power_dbm": 22,
+     "sync_word": "0x12345690",
+     "tx_ingress_mode": "both",
+     "client_radio": {
+       "serial_port": "/dev/ttyACM1",
+       "baud_rate": 115200,
+       "frequency_hz": 868300000
+     }
+   }
+   ```
+
+3. **Running a Multi-Node Subnet Over TCP/IP (`Libp2p` Transport, Without Radio Hardware)**:
+   If you want to run a multi-validator BFT cluster across LAN/cloud VMs without LR2021 USB radios:
+   - Set `"lr2021": { "enabled": false, ... }`.
+   - Set all 10 channels in `"genesis.transport_selection"` from `"Flrc"` to `"Libp2p"`.
+   - Populate `"p2p.bootstrap_nodes"` with multiaddrs of your peers, e.g.:
+     ```json
+     "bootstrap_nodes": [
+       "/ip4/192.168.50.91/tcp/30303/p2p/12D3KooWEAnEJfhCDtp3EAcNgDtkEcsYMBvkSSzi6vKciGq3qnz8",
+       "/ip4/192.168.50.92/tcp/30303/p2p/12D3KooWRqMXcfk8oPMBFY1n1s5WQvxSQojCyDtYASBXpTVdVu2J"
+     ]
+     ```
+
+---
+
+### 3.4 Launching & Managing Subnet Roles (`Validator`, `Roamer`, `Repeater`)
+
+```bash
+# 1. Start as a configured Genesis Validator
 lexicon-node --config config.json
 
-# 3b. Start as a mobile frequency-scanning Roamer (GPS Haversine + store-and-forward relay)
+# 2. Start as a mobile frequency-scanning Roamer (GPS Haversine + cross-subnet store-and-forward relay)
 lexicon-node --config config.json --roaming
 
-# 3c. Start as a stationary long-range Repeater
+# 3. Start as a stationary long-range Repeater
 lexicon-node --config config.json --repeater
 
-# 3d. Dynamically join an active subnet as a Probation Validator
-lexicon-node --config config.json --join-validator --subnet 00000001 --freq-hz 915000000
+# 4. Dynamically join an active subnet as a Probation Validator
+lexicon-node --config config.json --join-validator --subnet 00000001 --freq-hz 867100000
+```
+
+#### Installing as a Production `systemd` Service
+```bash
+sudo cp bin/lexicon-node /usr/local/bin/lexicon-node
+sudo mkdir -p /opt/lexicon
+sudo cp subnet-bundle/validator-1/config.json /opt/lexicon/config.json
+sudo cp subnet-bundle/validator-1/lexicon-node.service /etc/systemd/system/lexicon-node.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now lexicon-node
+sudo journalctl -u lexicon-node -f
+```
+
+---
+
+### 3.5 Verifying Subnet Quorum & Block Finality
+
+Once at least $\lceil 2N/3 \rceil$ validators (e.g. 3 of 4 validators) are online, verify block progression and consensus state across the subnet:
+
+```bash
+# Check latest finalized block height across all 4 validators
+for host in 192.168.50.91 192.168.50.92 192.168.50.93 192.168.50.94; do
+  printf "%s: " "$host"
+  curl -s --max-time 2 -X POST "http://$host:8545" \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+  echo ""
+done
+
+# Inspect local node consensus role & discovered radio subnets
+curl -s -X POST http://127.0.0.1:8545 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"slx_role","params":[],"id":1}'
 ```
 
 ---
@@ -103,7 +269,7 @@ lexicon-node --config config.json --join-validator --subnet 00000001 --freq-hz 9
 ## 4. JSON-RPC & WebSocket Endpoints
 
 By default, `lexicon-node` serves:
-- **HTTP JSON-RPC:** `http://127.0.0.1:8545`
+- **HTTP JSON-RPC:** `http://127.0.0.1:8545` (or `0.0.0.0:8545` in subnet configs)
 - **WebSocket Pub/Sub:** `ws://127.0.0.1:8546`
 
 ### Key JSON-RPC Methods
